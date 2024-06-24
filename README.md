@@ -17,6 +17,18 @@ NTU RGB+D 120 one-shot setting dataset: https://pan.baidu.com/s/1bvJhOeHRGyKWfuS
 
 https://drive.google.com/file/d/1qaMhvwBqTfuLViv3M9neuLTnqoz6RDHF/view?usp=sharing
 
+# Data Storage Format
+
+Our data is organized in the following folder structure:
+
+- data/
+  - kinetics/
+    - Kinetics/
+  - ntu1s/
+  - ntu120/
+    - NTU-S/
+    - NTU-T/
+
 # Run
 Run our proposed method on the NTU-T dataset with 5-way 1-shot settings:
 ```python
