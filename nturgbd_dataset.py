@@ -77,7 +77,7 @@ class NTU_RGBD_Dataset(data.Dataset):
         self.target_transform = target_transform
 
         if gl.dataset == 'ntu-T':
-            path = "D:/code_program/DASTM-main/data/ntu120/NTU-T"
+            path = "data/ntu120/NTU-T"
             segment = 30
         elif gl.dataset == 'ntu-S':
             path = "data/ntu120/NTU-S"
