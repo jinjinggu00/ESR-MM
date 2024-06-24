@@ -1,4 +1,4 @@
-# TSM：PAInet
+# Parallel attention interaction network for few-shot skeleton-based action recognition: Temporal Set Metric
 
 import torch
 import torch.nn as nn

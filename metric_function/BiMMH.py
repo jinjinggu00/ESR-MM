@@ -10,16 +10,6 @@ class BiMeanHausdorffMetric(nn.Module):
         super(BiMeanHausdorffMetric, self).__init__()
         self.distance_type = distance_type
         self.temporal_consistency_weight = temporal_consistency_weight
-        '''
-        'temporal_consistency_weight这个参数是用于控制时间不连贯性损失的权重的。' \
-        '时间不连贯性损失是指两个视频中相邻帧之间的距离变化是否平滑，' \
-        '如果变化太大，说明两个视频之间的时间关系不一致，' \
-        '反之则说明两个视频之间的时间关系较为一致。这个损失是用于惩罚两个视频之间的时间不连贯性的，' \
-        '它与bidirectional Mean Hausdorff Metric一起构成了总损失。' \
-        'temporal_consistency_weight=0.1表示时间不连贯性损失在总损失中占有10%的比重，' \
-        '如果这个参数越大，表示对时间不连贯性的惩罚越重，如果这个参数越小，表示对时间不连贯性的惩罚越轻。' \
-        '您可以根据您的需求来调整这个参数的值，以达到最佳的效果。'
-        '''
 
     def __call__(self, query, support):
         return self.forward(query, support)
