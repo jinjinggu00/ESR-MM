@@ -55,6 +55,7 @@ python train.py  --bakbone ctrgcn
 python train.py  --bakbone stgcnpp
 python train.py  --bakbone hdgcn
 ```
+## Comprehensive documentation and detailed usage instructions are in progress. The codebase is currently undergoing refinement and optimization. We appreciate your patience as we work to provide a more robust and well-documented implementation. Updates will be made available as soon as possible.
 
 # Acknowledgements
 This repository is based on [DASTM](https://github.com/NingMa-AI/DASTM).
