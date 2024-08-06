@@ -51,9 +51,9 @@ python train.py    --dataset ntu1s   -cTr 20 -nqTr 5 -cVa 20 -nqVa 5  --epochs 3
 ```
 Using different backbones:
 ```python
-python train.py  --bakbone ctrgcn
-python train.py  --bakbone stgcnpp
-python train.py  --bakbone hdgcn
+python train.py  --backbone ctrgcn
+python train.py  --backbone stgcnpp
+python train.py  --backbone hdgcn
 ```
 ## Comprehensive documentation and detailed usage instructions are in progress. The codebase is currently undergoing refinement and optimization. We appreciate your patience as we work to provide a more robust and well-documented implementation. Updates will be made available as soon as possible.
 
