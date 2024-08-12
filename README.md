@@ -55,6 +55,48 @@ python train.py  --backbone ctrgcn
 python train.py  --backbone stgcnpp
 python train.py  --backbone hdgcn
 ```
+
+# Train using multimodal approaches (bond, joint speed, and bond speed)
+Train using the Early Fusion 1 method mentioned in the paper:
+```python
+python train.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003 --modal 2
+```
+Train using the Early Fusion 2 method mentioned in the paper:
+```python
+python train.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003 --modal 4 --weighted 1 
+```
+Train using the Early Fusion 3 method mentioned in the paper:
+```python
+python train_2ab.py -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003 --modal 4 --process 1
+```
+Please note the "--modal" parameter in the script, which can be set to 2-4 to obtain results using 2-4 modalities. The other parameters do not need to be changed. If results for a 5-way 5-shot setting are required, please add "-nsTr 5 -nsVa 5" to the script.
+
+In the paper, it is mentioned that the late fusion method requires training multiple models. We recommend using a shell script to complete the training process. Create a script file named "run.sh" with the following content:
+```shell
+#!/bin/bash
+python train2.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003  -model_name esr 
+wait
+
+python train2.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003  -model_name esr -bone 1 
+wait
+
+python train2.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003  -model_name esr -vel 1 
+wait
+
+python train2.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003  -model_name esr -bone 1 -vel 1 
+wait
+
+python ensemble.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003  -model_name esr --modal 2
+wait
+
+python ensemble.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003  -model_name esr --modal 3
+wait
+
+python ensemble.py  -reg 0.0005 --AA 1 --metric tcmhm --pca 0.003  -model_name esr --modal 4
+wait
+```
+The late fusion method involves first completing the training of four individual models, and then using the "ensemble.py" file to obtain the final accuracy using different modalities, which can be achieved by adjusting the "--modal" parameter. If results for a 5-way 5-shot setting are needed, add "-nsTr 5 -nsVa 5" to each line in the script.
+
 ## Comprehensive documentation and detailed usage instructions are in progress. The codebase is currently undergoing refinement and optimization. We appreciate your patience as we work to provide a more robust and well-documented implementation. Updates will be made available as soon as possible.
 
 # Acknowledgements
