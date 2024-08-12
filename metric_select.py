@@ -3,6 +3,7 @@ import metric_function
 from metric_function.metric_function import euclidean_dist, chebyshev_dist, jaccard_dist, manhattan_dist, cosine_dist, \
     dtw_loss, \
     bimmh_dist, otam, tsm_painet
+from utils import dist_normalization
 
 
 def metric_select(z_proto, zq, metric, n_class, n_query, t, v, c):
@@ -13,7 +14,7 @@ def metric_select(z_proto, zq, metric, n_class, n_query, t, v, c):
         dist = dtw_loss(zq, z_proto)
     elif metric == 'eucl':
         zq = zq.reshape(n_class * n_query, -1)
-        z_proto = z_proto.view(n_class, -1)
+        z_proto = z_proto.reshape(n_class, -1)
         dist = euclidean_dist(zq, z_proto)
     elif metric == 'tcmhm':
         zq = zq.permute(0, 2, 3, 1).contiguous()  # n, t, v, c
@@ -29,6 +30,7 @@ def metric_select(z_proto, zq, metric, n_class, n_query, t, v, c):
             # 输出nan的个数
             print(torch.count_nonzero(torch.isnan(dist)))
             dist = torch.nan_to_num(dist, nan=1e-6)
+        dist = dist_normalization(dist)
     elif metric == 'mhm':
         zq = zq.permute(0, 2, 3, 1).contiguous()  # n, t, v, c
         z_proto = z_proto.permute(0, 2, 3, 1).contiguous()
@@ -41,6 +43,7 @@ def metric_select(z_proto, zq, metric, n_class, n_query, t, v, c):
             print('dist存在nan')
             print(torch.count_nonzero(torch.isnan(dist)))
             dist = torch.nan_to_num(dist, nan=1e-6)
+        dist = dist_normalization(dist)
     elif metric == 'tsm':
         zq = zq.permute(0, 2, 3, 1).contiguous()  # n, t, v, c
         z_proto = z_proto.permute(0, 2, 3, 1).contiguous()

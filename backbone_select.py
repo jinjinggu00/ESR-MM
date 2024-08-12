@@ -4,9 +4,10 @@ from mmskl.ms_g3d.msg3d import MS_G3D_Model
 from mmskl.CTRGCN.ctrgcn import CTRGCN
 from mmskl.HDGCN.HDGCN import Model as HDGCN
 from mmskl.stgcnpp.stgcn import STGCN
+from mmskl.st_gcn.block_3 import GCN_3
 
 
-def Backbone(dataset, backbone):
+def Backbone(dataset, backbone, channel=3):
     if 'ntu' in dataset or dataset == 'pku':
         node = 25
         ms_graph = 'mmskl.ms_g3d_graph.ntu_rgb_d.AdjMatrixGraph'
@@ -30,7 +31,7 @@ def Backbone(dataset, backbone):
 
     if backbone == 'stgcn':
         model = ST_GCN_18(
-            in_channels=3,
+            in_channels=channel,
             num_class=60,
             dropout=0.1,
             edge_importance_weighting=False,
@@ -44,7 +45,8 @@ def Backbone(dataset, backbone):
             num_point=node,
             num_person=2,
             graph=sh_grpah,
-            graph_args={'labeling_mode': 'spatial'}
+            graph_args={'labeling_mode': 'spatial'},
+            in_channels=channel
         )
         out_channel = 256
     elif backbone == 'ms_g3d':
@@ -55,6 +57,7 @@ def Backbone(dataset, backbone):
             num_gcn_scales=13,
             num_g3d_scales=6,
             graph=ms_graph,
+            in_channels=channel
         )
         out_channel = 192
     elif backbone == 'ctrgcn':
@@ -64,7 +67,8 @@ def Backbone(dataset, backbone):
             num_point=node,
             num_person=2,
             graph=ctr_graph,
-            graph_args={'labeling_mode': 'spatial'}
+            graph_args={'labeling_mode': 'spatial'},
+            in_channels=channel
         )
         out_channel = 256
     elif backbone == 'hdgcn':
@@ -76,14 +80,15 @@ def Backbone(dataset, backbone):
             num_point=node,
             num_person=2,
             graph=hd_graph,
-            graph_args={'labeling_mode': 'spatial', 'CoM': 1}
+            graph_args={'labeling_mode': 'spatial', 'CoM': 1},
+            in_channels=channel
         )
         out_channel = 256
     elif backbone == 'stgcnpp':
         # 使用stgcn++
         model = STGCN(
             graph_cfg=stpp_graph,
-            in_channels=3,
+            in_channels=channel,
             base_channels=64,
             num_person=2,
             gcn_adaptive='init',
@@ -91,6 +96,15 @@ def Backbone(dataset, backbone):
             tcn_type='mstcn'
         )
         out_channel = 256
+    elif backbone == 'blcok3':
+        model = GCN_3(
+            in_channels=channel,
+            num_class=60,
+            dropout=0.1,
+            edge_importance_weighting=False,
+            graph_cfg=st_graph
+        )
+        out_channel = 64
     else:
         raise ValueError('Unknown backbone')
 

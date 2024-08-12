@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 import gl
 from cros_att_1 import CrossAttention as CrossAttention_1
-from utils import dist_normalization
 from metric_select import metric_select
 from backbone_select import Backbone
 
@@ -12,8 +11,7 @@ class ProtoNet(nn.Module):
 
     def __init__(self, opt):
         super(ProtoNet, self).__init__()
-
-        self.model, self.out_channel, self.seq_len = Backbone(gl.dataset, gl.backbone)
+        self.model, self.out_channel, self.seq_len = Backbone(gl.dataset, gl.backbone, gl.num_chanels)
 
         if gl.AA == 1:
             self.attention_c = CrossAttention_1(num_attention_heads=1, input_size=self.out_channel,
@@ -46,17 +44,12 @@ class ProtoNet(nn.Module):
 
         if gl.AA == 0:
             z_proto = z_proto.view(n_class, n_support, c, t, v).mean(1)  # n是类数, c, t, v
-            '不使用saa'
         else:
             z_proto = z_proto.view(n_class, n_support, c, t, v)  # n, c, t, v
             zq, z_proto = self.hal(zq, z_proto)
             z_proto = z_proto.mean(1)
 
         dist, z_proto, zq = metric_select(z_proto, zq, gl.metric, n_class, n_query, t, v, c)
-
-        dist = dist_normalization(dist)
-
-
 
         # torch.Size([5, 8, 25, 256]) z_proto.shape
         # torch.Size([50, 8, 25, 256]) zq.shape
@@ -115,7 +108,6 @@ class ProtoNet(nn.Module):
             z_proto = z_proto.mean(1)
 
         dist, z_proto, zq = metric_select(z_proto, zq, gl.metric, n_class, n_query, t, v, c)
-        dist = dist_normalization(dist)
 
         log_p_y = F.log_softmax(-dist, dim=1).view(n_class, n_query, -1)
         target_inds = torch.arange(0, n_class).to(gl.device)
@@ -126,6 +118,32 @@ class ProtoNet(nn.Module):
         acc_val = y_hat.eq(target_inds.squeeze()).float().mean()
 
         return acc_val
+
+    def test_ensemble(self, input, target, n_support):
+        n, c, t, v = input.size()
+        classes = torch.unique(target)
+        n_class = len(classes)
+        n_query = torch.where(target.eq(classes[0]))[0].size(0) - n_support
+
+        def supp_idxs(cc):
+            return torch.where(target.eq(cc))[0][:n_support]
+
+        support_idxs = list(map(supp_idxs, classes))
+        z_proto = torch.stack([input[idx_list] for idx_list in support_idxs]).view(-1, c, t, v)
+
+        query_idxs = torch.stack(list(map(lambda c: torch.where(target.eq(c))[0][n_support:], classes))).view(-1)
+        zq = input[query_idxs.long()]
+
+        if gl.AA == 0:
+            z_proto = z_proto.view(n_class, n_support, c, t, v).mean(1)
+        else:
+            z_proto = z_proto.view(n_class, n_support, c, t, v)
+            zq, z_proto = self.hal(zq, z_proto)
+            z_proto = z_proto.mean(1)
+
+        dist, z_proto, zq = metric_select(z_proto, zq, gl.metric, n_class, n_query, t, v, c)
+
+        return dist
 
     def hal(self, zq, z_proto):
         # Get sizes of input tensors

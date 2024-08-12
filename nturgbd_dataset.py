@@ -1,13 +1,9 @@
 # coding=utf-8
 from __future__ import print_function
 import torch.utils.data as data
-from PIL import Image
 import numpy as np
-import shutil
-import errno
 import torch
 import os
-import pickle
 import random
 import gl
 import torch.nn.functional as F
@@ -15,6 +11,26 @@ import torch.nn.functional as F
 '''
 Inspired by https://github.com/pytorch/vision/pull/46
 '''
+
+
+def get_bone(jo):
+    ntu_pairs = (
+        (1, 2), (2, 21), (3, 21), (4, 3), (5, 21), (6, 5),
+        (7, 6), (8, 7), (9, 21), (10, 9), (11, 10), (12, 11),
+        (13, 1), (14, 13), (15, 14), (16, 15), (17, 1), (18, 17),
+        (19, 18), (20, 19), (22, 23), (21, 21), (23, 8), (24, 25), (25, 12)
+    )
+    bone_data_numpy = np.zeros_like(jo)
+    for v1, v2 in ntu_pairs:
+        bone_data_numpy[:, :, v1 - 1] = jo[:, :, v1 - 1] - jo[:, :, v2 - 1]
+    jo = bone_data_numpy
+    return jo
+
+
+def get_vel(ve):
+    new_ve = np.zeros_like(ve)
+    new_ve[:, :-1] = ve[:, 1:] - ve[:, :-1]
+    return new_ve
 
 
 def _rot(rot):
@@ -62,55 +78,52 @@ def random_rot(data_numpy, theta=0.3):
 
 class NTU_RGBD_Dataset(data.Dataset):
 
-    def __init__(self, mode='train', data_list=None, debug=False, extract_frame=1, transform=None,
-                 target_transform=None):
-        '''
-        初始化数据集,参数包括:
-        mode: 'train'/'val'/'test',读取不同的数据集
-        debug: 是否开启debug模式,使用少量数据
-        extract_frame: 从完整的数据序列中抽取多少帧
-        transform: 数据预处理方式
-        target_transform: label预处理方式
-        '''
+    def __init__(self, mode='train', data_list=None, debug=False, extract_frame=1, modal=1, bone=0, vel=0, process=0,
+                 weighted=0):
+        global path
+        self.modal = modal
+        self.bone = bone
+        self.vel = vel
+        self.process = process
+        self.weighted = weighted
         super(NTU_RGBD_Dataset, self).__init__()
-        self.transform = transform
-        self.target_transform = target_transform
+        ori = "Path of the dataset"
 
         if gl.dataset == 'ntu-T':
-            path = "data/ntu120/NTU-T"
+            path = "ntu120/NTU-T"
             segment = 30
         elif gl.dataset == 'ntu-S':
-            path = "data/ntu120/NTU-S"
+            path = "ntu120/NTU-S"
             segment = 30
         elif gl.dataset == 'kinetics':
-            path = "data/kinetics/Kinetics"
+            path = "kinetics/Kinetics"
             segment = 50
         elif gl.dataset == 'pku':
-            path = "data/mypku"
+            path = "mypku"
             segment = 30
         elif gl.dataset == 'ntu1s':
-            path = "data/ntu1s"
+            path = "ntu1s"
             segment = 30
             extract_frame = 3
         else:
             ValueError('Unknown dataset')
 
         if mode == 'train':
-            data_path = os.path.join(path, 'train_data.npy')
-            label_path = os.path.join(path, 'train_label.npy')
-            num_frame = os.path.join(path, 'train_frame.npy')
+            data_path = os.path.join(ori, path, 'train_data.npy')
+            label_path = os.path.join(ori, path, 'train_label.npy')
+            num_frame = os.path.join(ori, path, 'train_frame.npy')
         elif mode == 'val':
-            data_path = os.path.join(path, 'val_data.npy')
-            label_path = os.path.join(path, 'val_label.npy')
-            num_frame = os.path.join(path, 'val_frame.npy')
+            data_path = os.path.join(ori, path, 'val_data.npy')
+            label_path = os.path.join(ori, path, 'val_label.npy')
+            num_frame = os.path.join(ori, path, 'val_frame.npy')
         elif gl.dataset == 'ntu1s' and mode == 'test':
-            data_path = os.path.join(path, 'val_data.npy')
-            label_path = os.path.join(path, 'val_label.npy')
-            num_frame = os.path.join(path, 'val_frame.npy')
+            data_path = os.path.join(ori, path, 'val_data.npy')
+            label_path = os.path.join(ori, path, 'val_label.npy')
+            num_frame = os.path.join(ori, path, 'val_frame.npy')
         else:
-            data_path = os.path.join(path, 'test_data.npy')
-            label_path = os.path.join(path, 'test_label.npy')
-            num_frame = os.path.join(path, 'test_frame.npy')
+            data_path = os.path.join(ori, path, 'test_data.npy')
+            label_path = os.path.join(ori, path, 'test_label.npy')
+            num_frame = os.path.join(ori, path, 'test_frame.npy')
 
         self.data, self.label, self.num_frame = np.load(data_path), np.load(label_path), np.load(num_frame)
 
@@ -130,11 +143,64 @@ class NTU_RGBD_Dataset(data.Dataset):
         print('n_class', n_classes)
 
     def __getitem__(self, idx):  # 获取样本和标签
-        x = self.data[idx]
-        if self.transform:
-            x = self.transform(x)
+        x = self.data[idx]  # x.shape:(3, 30, 25, 2)
         if gl.dataset == 'ntu1s':
             x = random_rot(x)
+        if self.process == 1:
+            if self.modal == 2:
+                x1 = get_bone(x)
+                return x, x1, self.label[idx]
+            elif self.modal == 3:
+                x1 = get_bone(x)
+                x2 = get_vel(x)
+                return x, x1, x2, self.label[idx]
+            elif self.modal == 4:
+                x1 = get_bone(x)
+                x2 = get_vel(x)
+                x3 = get_vel(x1)
+                return x, x1, x2, x3, self.label[idx]
+            else:
+                ValueError('Unknown modal, you should choose 2, 3 or 4.')
+        if self.weighted == 1:
+            if self.modal == 2:
+                x1 = get_bone(x)
+                x = x + x1
+                return x, self.label[idx]
+            elif self.modal == 3:
+                x1 = get_bone(x)
+                x2 = get_vel(x)
+                x = x * 0.6 + x1 * 0.4 + x2 * 0.4
+                return x, self.label[idx]
+            elif self.modal == 4:
+                x1 = get_bone(x)
+                x2 = get_vel(x)
+                x3 = get_vel(x1)
+                x = x * 0.5 + x1 * 0.3 + x2 * 0.3 + x3 * 0.3
+                return x, self.label[idx]
+            else:
+                ValueError('You have set the weighted parameter and want to use the early fusion method of weighted '
+                           'addition, but the number of modalities you have selected is not 2, 3, 4. '
+                           'Please set the modal parameter')
+        if self.modal == 2:
+            x1 = get_bone(x)
+            x = np.concatenate((x, x1), axis=0)
+            return x, self.label[idx]
+        elif self.modal == 3:
+            x1 = get_bone(x)
+            x2 = get_vel(x)
+            x = np.concatenate((x, x1, x2), axis=0)
+            return x, self.label[idx]
+        elif self.modal == 4:
+            x1 = get_bone(x)
+            x2 = get_vel(x)
+            x3 = get_vel(x1)
+            x = np.concatenate((x, x1, x2, x3), axis=0)
+            return x, self.label[idx]
+        if self.bone == 1:
+            x = get_bone(x)
+        if self.vel == 1:
+            x = get_vel(x)
+
         return x, self.label[idx]
 
     def __len__(self):  # 数据集长度

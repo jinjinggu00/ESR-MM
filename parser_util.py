@@ -10,6 +10,39 @@ def get_parser():
                         help='type of dataset',
                         default='ntu-T', choices=["ntu-S", "ntu-T", "kinetics", "pku", "ntu1s"])
 
+    parser.add_argument('-modal', '--modal',
+                        type=int,
+                        help='The number of modalities used for early fusion is 1, with no occurrence, '
+                             '2 using joints and bones, 3 using joints, bones, and joint velocities, '
+                             'and 4 using joints, bones, joint velocities, and bone velocities',
+                        default=1)
+
+    parser.add_argument('-weighted', '--weighted',
+                        type=int,
+                        help='Used in conjunction with modal parameters, early fusion of weighted addition',
+                        default=0)
+
+    parser.add_argument('-process', '--process',
+                        type=int,
+                        help='One of the identifiers used to control early fusion methods, '
+                             'when set to 1, uses a 3-block network that does not share weights to preliminarily '
+                             'extract features from data of different modalities, then concatenates them in the '
+                             'channel dimension and sends them to the complete backbone.',
+                        default=0)
+
+    parser.add_argument('-bone', '--bone',
+                        type=int,
+                        help='If the parameter used to select the single modal training data modality is 1, '
+                             'use the bone data',
+                        default=0)
+
+    parser.add_argument('-vel', '--vel',
+                        type=int,
+                        help='The parameter used to select the single modal training data modality is 1, '
+                             'which uses velocity data. When the bond is 0, it is joint velocity, '
+                             'and when the bond is 1, it is bond velocity',
+                        default=0)
+
     parser.add_argument('-mode', '--mode',
                         type=str,
                         help='mode',
@@ -19,6 +52,12 @@ def get_parser():
                         type=int,
                         help='Load saved weights and continue training',
                         default=0)
+
+    parser.add_argument('-model_name', '--model_name',
+                        type=str,
+                        help='The name used in the late stage fusion of knowledge, training and inference will be '
+                             'created/read based on this name, please ensure consistency.',
+                        default='protonet')
 
     parser.add_argument('-reg_thred', '--thred',
                         type=int,
@@ -68,7 +107,7 @@ def get_parser():
     parser.add_argument('-optim', '--optim',
                         type=str,
                         help='type of optimizer',
-                        default='adam',)
+                        default='adam')
 
     parser.add_argument('-lr', '--learning_rate',
                         type=float,

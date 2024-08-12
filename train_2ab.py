@@ -1,10 +1,14 @@
+"""Training program for early fusion of PAINet"""
 # coding=utf-8
 import random
 import fitlog
+
+from backbone_select import Backbone
 from protonet import ProtoNet
 from prototypical_batch_sampler import PrototypicalBatchSampler
 from nturgbd_dataset import NTU_RGBD_Dataset
 from parser_util import get_parser
+from utils import load_data, get_para_num, setup_seed, getAvaliableDevice
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -17,7 +21,7 @@ from utils import *
 
 fitlog.debug()
 fitlog.set_log_dir('logs')
-fitlog.commit(__file__, 'ESR-MM')
+fitlog.commit(__file__, 'ESR-MM with painet early fusion')
 fitlog.add_hyper_in_file(__file__)  # record your hyperparameters
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -35,7 +39,7 @@ def init_seed(opt):
 def init_dataset(opt, data_list, mode):
     debug = False
     dataset = NTU_RGBD_Dataset(mode=mode, data_list=data_list, debug=debug, extract_frame=opt.extract_frame,
-                               modal=opt.modal, weighted=opt.weighted)
+                               modal=opt.modal, process=opt.process)
     n_classes = len(np.unique(dataset.label))
     if n_classes < opt.classes_per_it_tr or n_classes < opt.classes_per_it_val:
         raise (Exception('There are not enough classes in the dataset in order ' +
@@ -78,20 +82,19 @@ def init_protonet(opt):
     return model
 
 
-def init_optim(opt, model):
+def init_optim(opt, all_params):
     if opt.optim == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), lr=opt.learning_rate, momentum=0.9, weight_decay=5e-4,
-                                    nesterov=True)
+        optimizer = torch.optim.SGD(all_params, lr=opt.learning_rate, momentum=0.9, weight_decay=5e-4, nesterov=True)
     elif opt.optim == 'adam':
-        optimizer = torch.optim.Adam(params=model.parameters(), lr=opt.learning_rate, weight_decay=5e-4)
+        optimizer = torch.optim.Adam(params=all_params, lr=opt.learning_rate, weight_decay=5e-4)
     elif opt.optim == 'adamw':
-        optimizer = torch.optim.AdamW(params=model.parameters(), lr=opt.learning_rate, weight_decay=5e-4)
+        optimizer = torch.optim.AdamW(params=all_params, lr=opt.learning_rate, weight_decay=5e-4)
     elif opt.optim == 'radam':
         from torch_optimizer import RAdam
-        optimizer = RAdam(model.parameters(), lr=opt.learning_rate, weight_decay=5e-4)
+        optimizer = RAdam(all_params, lr=opt.learning_rate, weight_decay=5e-4)
     elif opt.optim == 'lookahead':
         from torch_optimizer import Lookahead
-        base_optimizer = torch.optim.AdamW(params=model.parameters(), lr=opt.learning_rate, weight_decay=5e-4)
+        base_optimizer = torch.optim.AdamW(params=all_params, lr=opt.learning_rate, weight_decay=5e-4)
         optimizer = Lookahead(base_optimizer, k=5, alpha=0.5)
     else:
         raise ValueError('Invalid optimizer')
@@ -122,8 +125,41 @@ def init_lr_scheduler(opt, optim, train_loader):
     return lr_scheduler
 
 
+def init_model(opt, model):
+    if opt.process == 1:
+        if opt.modal == 2:
+            model1, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            model2, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            all_params = (list(model.parameters()) +
+                          list(model1.parameters()) +
+                          list(model2.parameters()))
+            return model1.to(gl.device), model2.to(gl.device), all_params
+        elif opt.modal == 3:
+            model1, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            model2, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            model3, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            all_params = (list(model.parameters()) +
+                          list(model1.parameters()) +
+                          list(model2.parameters()) +
+                          list(model3.parameters()))
+            return model1.to(gl.device), model2.to(gl.device), model3.to(gl.device), all_params
+        elif opt.modal == 4:
+            model1, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            model2, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            model3, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            model4, _, _ = Backbone(opt.dataset, 'blcok3', 3)
+            all_params = (list(model.parameters()) +
+                          list(model1.parameters()) +
+                          list(model2.parameters()) +
+                          list(model3.parameters()) +
+                          list(model4.parameters()))
+            return model1.to(gl.device), model2.to(gl.device), model3.to(gl.device), model4.to(gl.device), all_params
+        else:
+            ValueError('Unknown modal, you should choose 2, 3 or 4.')
+
+
 def train(opt, tr_dataloader, model, optim, lr_scheduler, val_dataloader=None, test_dataloader=None, start_epoch=0,
-          beacc=0):
+          beacc=0, model1=None, model2=None, model3=None, model4=None):
     scaler = torch.cuda.amp.GradScaler()
     import json
     with open(os.path.join(opt.experiment_root, 'opt.json'), 'w') as f:
@@ -160,11 +196,48 @@ def train(opt, tr_dataloader, model, optim, lr_scheduler, val_dataloader=None, t
             # for batch in tr_iter:
             optim.zero_grad()
             gl.mod = 'train'
-            x, y = batch
-            if type(y) is list:
-                y = [int(label) for label in y]
-                y = torch.tensor(y)
-            x, y = x.to(gl.device).float(), y.to(gl.device)
+            if opt.process == 1:
+                if opt.modal == 2:
+                    x, x1, y = batch
+                    if type(y) is list:
+                        y = [int(label) for label in y]
+                        y = torch.tensor(y)
+                    x, x1, y = x.to(gl.device).float(), x1.to(gl.device).float(), y.to(gl.device)
+                    o1 = model1(x)
+                    o2 = model2(x1)
+                    x = torch.cat([o1, o2], dim=1)
+                elif opt.modal == 3:
+                    x, x1, x2, y = batch
+                    if type(y) is list:
+                        y = [int(label) for label in y]
+                        y = torch.tensor(y)
+                    x, x1, x2, y = x.to(gl.device).float(), x1.to(gl.device).float(), x2.to(gl.device).float(), y.to(
+                        gl.device)
+                    o1 = model1(x)
+                    o2 = model2(x1)
+                    o3 = model3(x2)
+                    x = torch.cat([o1, o2, o3], dim=1)
+                elif opt.modal == 4:
+                    x, x1, x2, x3, y = batch
+                    if type(y) is list:
+                        y = [int(label) for label in y]
+                        y = torch.tensor(y)
+                    x, x1, x2, x3, y = x.to(gl.device).float(), x1.to(gl.device).float(), x2.to(
+                        gl.device).float(), x3.to(
+                        gl.device).float(), y.to(gl.device)
+                    o1 = model1(x)
+                    o2 = model2(x1)
+                    o3 = model3(x2)
+                    o4 = model4(x3)
+                    x = torch.cat([o1, o2, o3, o4], dim=1)
+                else:
+                    ValueError('Unknown modal, you should choose 2, 3 or 4.')
+            else:
+                x, y = batch
+                if type(y) is list:
+                    y = [int(label) for label in y]
+                    y = torch.tensor(y)
+                x, y = x.to(gl.device).float(), y.to(gl.device)
             # x torch.Size([55, 3, 30, 25, 2])
             model_output = model(x)
 
@@ -212,12 +285,49 @@ def train(opt, tr_dataloader, model, optim, lr_scheduler, val_dataloader=None, t
         val_acc = []
         with torch.no_grad():
             for batch in tqdm(val_iter):
-                # for batch in val_iter:
-                x, y = batch
-                if type(y) is list:
-                    y = [int(label) for label in y]
-                    y = torch.tensor(y)
-                x, y = x.to(gl.device).float(), y.to(gl.device)
+                if opt.process == 1:
+                    if opt.modal == 2:
+                        x, x1, y = batch
+                        if type(y) is list:
+                            y = [int(label) for label in y]
+                            y = torch.tensor(y)
+                        x, x1, y = x.to(gl.device).float(), x1.to(gl.device).float(), y.to(gl.device)
+                        o1 = model1(x)
+                        o2 = model2(x1)
+                        x = torch.cat([o1, o2], dim=1)
+                    elif opt.modal == 3:
+                        x, x1, x2, y = batch
+                        if type(y) is list:
+                            y = [int(label) for label in y]
+                            y = torch.tensor(y)
+                        x, x1, x2, y = x.to(gl.device).float(), x1.to(gl.device).float(), x2.to(
+                            gl.device).float(), y.to(
+                            gl.device)
+                        o1 = model1(x)
+                        o2 = model2(x1)
+                        o3 = model3(x2)
+                        x = torch.cat([o1, o2, o3], dim=1)
+                    elif opt.modal == 4:
+                        x, x1, x2, x3, y = batch
+                        if type(y) is list:
+                            y = [int(label) for label in y]
+                            y = torch.tensor(y)
+                        x, x1, x2, x3, y = x.to(gl.device).float(), x1.to(gl.device).float(), x2.to(
+                            gl.device).float(), x3.to(
+                            gl.device).float(), y.to(gl.device)
+                        o1 = model1(x)
+                        o2 = model2(x1)
+                        o3 = model3(x2)
+                        o4 = model4(x3)
+                        x = torch.cat([o1, o2, o3, o4], dim=1)
+                    else:
+                        ValueError('Unknown modal, you should choose 2, 3 or 4.')
+                else:
+                    x, y = batch
+                    if type(y) is list:
+                        y = [int(label) for label in y]
+                        y = torch.tensor(y)
+                    x, y = x.to(gl.device).float(), y.to(gl.device)
                 gl.mod = 'val'
                 model_output = model(x)
                 acc = model.evaluate(model_output, target=y, n_support=opt.num_support_val)
@@ -256,6 +366,21 @@ def train(opt, tr_dataloader, model, optim, lr_scheduler, val_dataloader=None, t
             best_acc = avg_acc
             best_epoch = epoch
             best_state = model.state_dict()
+            if opt.modal == 2:
+                bs1 = model1.state_dict()
+                bs2 = model2.state_dict()
+                bs3 = None
+                bs4 = None
+            elif opt.modal == 3:
+                bs1 = model1.state_dict()
+                bs2 = model2.state_dict()
+                bs3 = model3.state_dict()
+                bs4 = None
+            elif opt.modal == 4:
+                bs1 = model1.state_dict()
+                bs2 = model2.state_dict()
+                bs3 = model3.state_dict()
+                bs4 = model4.state_dict()
         else:
             patience += 1
 
@@ -275,10 +400,10 @@ def train(opt, tr_dataloader, model, optim, lr_scheduler, val_dataloader=None, t
     fitlog.add_other(name='end_epoch', value=epoch)
     fitlog.add_other(name='best_trepoch', value=best_epoch)
     fitlog.add_best_metric(name='best_tracc', value=best_acc)
-    return best_state, best_acc
+    return best_state, best_acc, bs1, bs2, bs3, bs4
 
 
-def test(opt, test_dataloader, model):
+def test(opt, test_dataloader, model, model1=None, model2=None, model3=None, model4=None):
     '''
     Test the model trained with the prototypical learning algorithm
     '''
@@ -294,11 +419,49 @@ def test(opt, test_dataloader, model):
             gl.epoch = epoch
             test_iter = iter(test_dataloader)
             for batch in test_iter:
-                x, y = batch
-                if type(y) is list:
-                    y = [int(label) for label in y]
-                    y = torch.tensor(y)
-                x, y = x.to(gl.device).float(), y.to(gl.device)
+                if opt.process == 1:
+                    if opt.modal == 2:
+                        x, x1, y = batch
+                        if type(y) is list:
+                            y = [int(label) for label in y]
+                            y = torch.tensor(y)
+                        x, x1, y = x.to(gl.device).float(), x1.to(gl.device).float(), y.to(gl.device)
+                        o1 = model1(x)
+                        o2 = model2(x1)
+                        x = torch.cat([o1, o2], dim=1)
+                    elif opt.modal == 3:
+                        x, x1, x2, y = batch
+                        if type(y) is list:
+                            y = [int(label) for label in y]
+                            y = torch.tensor(y)
+                        x, x1, x2, y = x.to(gl.device).float(), x1.to(gl.device).float(), x2.to(
+                            gl.device).float(), y.to(
+                            gl.device)
+                        o1 = model1(x)
+                        o2 = model2(x1)
+                        o3 = model3(x2)
+                        x = torch.cat([o1, o2, o3], dim=1)
+                    elif opt.modal == 4:
+                        x, x1, x2, x3, y = batch
+                        if type(y) is list:
+                            y = [int(label) for label in y]
+                            y = torch.tensor(y)
+                        x, x1, x2, x3, y = x.to(gl.device).float(), x1.to(gl.device).float(), x2.to(
+                            gl.device).float(), x3.to(
+                            gl.device).float(), y.to(gl.device)
+                        o1 = model1(x)
+                        o2 = model2(x1)
+                        o3 = model3(x2)
+                        o4 = model4(x3)
+                        x = torch.cat([o1, o2, o3, o4], dim=1)
+                    else:
+                        ValueError('Unknown modal, you should choose 2, 3 or 4.')
+                else:
+                    x, y = batch
+                    if type(y) is list:
+                        y = [int(label) for label in y]
+                        y = torch.tensor(y)
+                    x, y = x.to(gl.device).float(), y.to(gl.device)
                 model_output = model(x)
                 # _, acc, _, _ = model.train_mode(model_output, target=y, n_support=opt.num_support_val)
                 acc = model.evaluate(model_output, target=y, n_support=opt.num_support_val)
@@ -349,14 +512,6 @@ def main():
     gl.pca = options.pca
     gl.metric = options.metric
     gl.modal = options.modal
-    if options.modal == 2:
-        gl.num_chanels = 6
-    elif options.modal == 3:
-        gl.num_chanels = 9
-    elif options.modal == 4:
-        gl.num_chanels = 12
-    if options.weighted == 1:
-        gl.num_chanels = 3
     gl.vel = options.vel
     gl.bone = options.bone
     print('Dataset:', gl.dataset)
@@ -374,13 +529,22 @@ def main():
     fitlog.add_hyper(name='way', value=options.classes_per_it_tr)
     fitlog.add_hyper(name='shot', value=options.num_support_tr)
     fitlog.add_hyper(name='modal', value=options.modal)
-    fitlog.add_hyper(name='weighted', value=options.weighted)
 
     if not os.path.exists(gl.experiment_root):
         os.makedirs(gl.experiment_root)
 
     if torch.cuda.is_available() and not options.cuda:
         print("WARNING: You have a CUDA device, so you should probably run with --cuda")
+
+    if options.process == 1:
+        if options.modal == 2:
+            gl.num_chanels = 128
+        elif options.modal == 3:
+            gl.num_chanels = 192
+        elif options.modal == 4:
+            gl.num_chanels = 256
+        else:
+            ValueError('Unknown modal, you should choose 2, 3 or 4.')
 
     init_seed(options)
     setup_seed(options.manual_seed)
@@ -392,7 +556,23 @@ def main():
     test_dataloader = init_dataloader(options, data_list, 'test')
 
     model = init_protonet(options)
-    optim = init_optim(options, model)
+    all_params = model.parameters()
+    model1 = None
+    model2 = None
+    model3 = None
+    model4 = None
+
+    if options.process == 1:
+        if options.modal == 2:
+            model1, model2, all_params = init_model(options, model)
+        elif options.modal == 3:
+            model1, model2, model3, all_params = init_model(options, model)
+        elif options.modal == 4:
+            model1, model2, model3, model4, all_params = init_model(options, model)
+        else:
+            ValueError('Unknown modal, you should choose 2, 3 or 4.')
+
+    optim = init_optim(options, all_params)
     lr_scheduler = init_lr_scheduler(options, optim, tr_dataloader)
 
     if options.mode == 'train':
@@ -414,24 +594,40 @@ def main():
                     optim=optim,
                     lr_scheduler=lr_scheduler,
                     start_epoch=epoch,
-                    beacc=bsacc)
-        best_state, best_acc = res
+                    beacc=bsacc,
+                    model1=model1,
+                    model2=model2,
+                    model3=model3,
+                    model4=model4)
+        best_state, best_acc, bs1, bs2, bs3, bs4 = res
 
         model.load_state_dict(best_state)
         model_path = os.path.join(options.experiment_root, 'best_model.pth')
         model.load_state_dict(torch.load(model_path))
+        if options.modal == 2:
+            model1.load_state_dict(bs1)
+            model2.load_state_dict(bs2)
+        elif options.modal == 3:
+            model1.load_state_dict(bs1)
+            model2.load_state_dict(bs2)
+            model3.load_state_dict(bs3)
+        elif options.modal == 4:
+            model1.load_state_dict(bs1)
+            model2.load_state_dict(bs2)
+            model3.load_state_dict(bs3)
+            model4.load_state_dict(bs4)
 
         print('Testing with best model..')
         test(opt=options,
              test_dataloader=test_dataloader,
-             model=model)
+             model=model, model1=model1, model2=model2, model3=model3, model4=model4)
     elif options.mode == 'test':  # -mode test
         model_path = os.path.join(options.experiment_root, 'best_model.pth')
         model.load_state_dict(torch.load(model_path))
         print('Testing with best model..')
         test(opt=options,
              test_dataloader=test_dataloader,
-             model=model)
+             model=model, model1=model1, model2=model2, model3=model3, model4=model4)
 
 
 if __name__ == '__main__':

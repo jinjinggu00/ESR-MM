@@ -17,3 +17,7 @@ dataset = 'ntu120'
 AA = 0
 pca = 0
 metric = 'eucl'
+bone = 0
+vel = 0
+modal = 1
+num_chanels = 3
